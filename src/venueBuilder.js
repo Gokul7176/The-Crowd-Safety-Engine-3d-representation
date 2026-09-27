@@ -225,6 +225,17 @@ function buildStationEquipment(group) {
     group.add(led);
   }
 
+  // Auxiliary Gate 3 (Side Exit Gate for Emergency Relief)
+  const auxGatePost = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.4), MATERIALS.stainlessMetal);
+  auxGatePost.position.set(-9, 0.7, 15);
+  group.add(auxGatePost);
+
+  const auxGateBar = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.1), MATERIALS.stainlessMetal);
+  auxGateBar.position.set(-9, 0.7, 15);
+  auxGateBar.name = 'GATE3_BAR';
+  auxGateBar.userData = { isInteractive: true, name: 'Auxiliary Gate 3' };
+  group.add(auxGateBar);
+
   // 3. PASSENGER BENCHES (Zone A & Zone C)
   [[-18, -6], [-18, 4], [-6, -4]].forEach(([x, z]) => {
     const bench = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.45, 0.6), MATERIALS.darkConcrete);
@@ -272,4 +283,14 @@ function buildSensorsAndCCTV(group) {
 
     group.add(cameraGroup);
   });
+}
+
+// Update Auxiliary Gate 3 3D visual open/closed state
+export function updateGate3Visual(isOpen, venueGroup) {
+  if (!venueGroup) return;
+  const gate3Bar = venueGroup.getObjectByName('GATE3_BAR');
+  if (gate3Bar) {
+    gate3Bar.rotation.y = isOpen ? Math.PI / 2 : 0;
+    gate3Bar.position.x = isOpen ? -10.2 : -9;
+  }
 }

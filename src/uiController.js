@@ -1,97 +1,236 @@
-import { ZONES, SLIDING_WINDOW, PIPELINE_NODES, OPERATOR_WORKFLOW, MAPREDUCE_DEMO } from './crowdData.js';
+import { simulationState, getZoneMetrics, stepSlidingWindow } from './crowdData.js';
+import { updateGate3Visual } from './venueBuilder.js';
+import { syncCrowdDensityForZone } from './humanBuilder.js';
 
-export function setupUIController(interactionHandler, sceneSetup, toggleSimulationCallback) {
-  let isSimulating = true;
-  let activeSelection = { type: 'ZONE', id: 'ZONE_D' };
-
-  // DOM Element References
+export function setupUIController(interactionHandler, sceneSetup, toggleSimulationCallback, scene, crowdMembers, zoneBounds) {
   const inspectorContent = document.getElementById('inspector-content');
-  const slidingWindowContainer = document.getElementById('sliding-window-widget');
   const alertToast = document.getElementById('alert-toast');
   const btnToggleSim = document.getElementById('btn-toggle-sim');
   const btnResetView = document.getElementById('btn-reset-view');
 
-  // Quick Navigation Buttons
+  // Update Top Quick Navigation Bar Status Dots dynamically
+  function syncTopNavStatusDots() {
+    document.querySelectorAll('.btn-zone-nav').forEach(btn => {
+      const zId = btn.dataset.zone;
+      if (zId && simulationState.zones[zId]) {
+        const zone = simulationState.zones[zId];
+        const metrics = getZoneMetrics(zone);
+        const dot = btn.querySelector('.status-dot');
+        if (dot) {
+          dot.className = `status-dot ${metrics.status === 'CRITICAL' ? 'red' : metrics.status === 'HIGH' ? 'amber' : 'green'}`;
+        }
+      }
+    });
+
+    // Update Alert Toast text dynamically
+    if (alertToast) {
+      const activeZone = simulationState.zones[simulationState.selectedZone];
+      const activeMetrics = getZoneMetrics(activeZone);
+      if (activeMetrics.status === 'CRITICAL') {
+        alertToast.textContent = `🚨 LIVE CROWD ALERT: ${activeZone.name} Bottleneck Critical! (${activeZone.count} people)`;
+        alertToast.classList.add('visible');
+      } else {
+        alertToast.classList.remove('visible');
+      }
+    }
+  }
+
+  // Quick Navigation Button Click Listeners
   document.querySelectorAll('.btn-zone-nav').forEach(btn => {
     btn.addEventListener('click', () => {
       const zoneId = btn.dataset.zone;
-      activeSelection = { type: 'ZONE', id: zoneId };
-      interactionHandler.focusOnZone(zoneId);
+      if (!zoneId) return;
+      simulationState.selectedZone = zoneId;
+      simulationState.selectedPipelineNode = null;
+      if (interactionHandler) interactionHandler.focusOnZone(zoneId);
       renderInspector();
+      syncTopNavStatusDots();
     });
   });
 
   document.querySelectorAll('.btn-node-nav').forEach(btn => {
     btn.addEventListener('click', () => {
       const nodeId = btn.dataset.node;
-      activeSelection = { type: 'PIPELINE_NODE', id: nodeId };
-      interactionHandler.focusOnPipelineNode(nodeId);
+      if (!nodeId) return;
+      simulationState.selectedPipelineNode = nodeId;
+      if (interactionHandler) interactionHandler.focusOnPipelineNode(nodeId);
       renderInspector();
     });
   });
 
   if (btnResetView) {
     btnResetView.addEventListener('click', () => {
-      sceneSetup.resetView();
+      simulationState.selectedPipelineNode = null;
+      if (sceneSetup && sceneSetup.resetView) sceneSetup.resetView();
     });
   }
 
   if (btnToggleSim) {
     btnToggleSim.addEventListener('click', () => {
-      isSimulating = !isSimulating;
-      btnToggleSim.classList.toggle('active', isSimulating);
-      btnToggleSim.innerHTML = isSimulating
-        ? '<span class="status-dot green"></span> SIMULATION: RUNNING'
+      simulationState.isSimulating = !simulationState.isSimulating;
+      btnToggleSim.classList.toggle('active', simulationState.isSimulating);
+      btnToggleSim.innerHTML = simulationState.isSimulating
+        ? '<span class="status-dot green"></span> LIVE SIMULATION'
         : '<span class="status-dot gray"></span> SIMULATION: PAUSED';
-      toggleSimulationCallback(isSimulating);
+      if (toggleSimulationCallback) toggleSimulationCallback(simulationState.isSimulating);
     });
   }
 
-  // Global Click Event Listener for Action Triggers & Modals
+  // Global Event Listener for Action Triggers & Modals
   document.addEventListener('click', (e) => {
+    // 1. Step Event Button
     if (e.target.closest('#btn-step-window')) {
-      const result = SLIDING_WINDOW.pushNewEvent();
-      // Update Zone D count
-      ZONES.ZONE_D.count = result.newEvent.count;
-      ZONES.ZONE_D.status = result.newEvent.state;
-      renderSlidingWindowWidget();
-      renderInspector();
-      showToastNotification(`New Stream Event Arrived (${result.newEvent.timestamp} -> ${result.newEvent.count} people). Window advanced!`);
+      const result = stepSlidingWindow(simulationState.selectedZone);
+      if (result) {
+        // Sync 3D crowd density for the target zone
+        if (scene && crowdMembers && zoneBounds) {
+          syncCrowdDensityForZone(simulationState.selectedZone, result.count, scene, crowdMembers, zoneBounds);
+        }
+        renderInspector();
+        syncTopNavStatusDots();
+        showToastNotification(`New Stream Event Arrived (${result.timestamp} -> ${result.count} people). Window advanced!`);
+      }
+      return;
     }
 
+    // 2. Open Operator Modal Button
     if (e.target.closest('#btn-operator-action') || e.target.closest('.btn-operator-modal-trigger')) {
       openOperatorModal();
+      return;
     }
 
-    if (e.target.closest('.modal-close')) {
+    // 3. Modal Close Button or Modal Backdrop
+    if (e.target.closest('.modal-close') || e.target.classList.contains('modal-overlay')) {
       closeModals();
+      return;
     }
 
-    const optionCard = e.target.closest('.option-card');
-    if (optionCard && e.target.closest('#operator-modal')) {
-      const act = optionCard.getAttribute('data-action') || optionCard.id;
-      if (act.includes('gate') || act.includes('GATE')) {
+    // 4. Modal Action Execute Button
+    const execBtn = e.target.closest('.btn-action-execute');
+    if (execBtn) {
+      const act = execBtn.getAttribute('data-action') || '';
+      if (act.includes('GATE')) {
         window.executeIntervention('OPEN_AUX_GATE');
-      } else if (act.includes('marshal') || act.includes('MARSHALS')) {
+      } else if (act.includes('MARSHAL')) {
         window.executeIntervention('DEPLOY_MARSHALS');
-      } else if (act.includes('reroute') || act.includes('REROUTE')) {
+      } else if (act.includes('REROUTE')) {
         window.executeIntervention('BROADCAST_REROUTE');
+      } else {
+        window.executeIntervention('OPEN_AUX_GATE');
       }
+      return;
     }
   });
 
-  // Render Sidebar Inspector Content
+  // Render Sidebar Inspector Panel
   function renderInspector() {
     if (!inspectorContent) return;
 
-    if (activeSelection.type === 'ZONE') {
-      const zone = ZONES[activeSelection.id];
-      const statusClass = zone.status.toLowerCase();
+    if (simulationState.selectedPipelineNode) {
+      // Render Selected Big Data Pipeline Node Inspector
+      const nodeId = simulationState.selectedPipelineNode;
+      const node = simulationState.pipelineNodes[nodeId] || simulationState.pipelineNodes.HDFS;
+
+      let nodeContent = '';
+      if (nodeId === 'HDFS') {
+        nodeContent = `
+          <div class="tech-box">
+            <h4>HDFS Cluster Log Storage</h4>
+            <p>Path: <code>/crowd/logs/2026/09/28/zone_events.snappy.parquet</code></p>
+            <div class="log-preview">
+              <div class="log-line">08:18:00 [INFO] Zone_A: 16 | Zone_B: 45 | Zone_D: 55</div>
+              <div class="log-line">08:19:00 [INFO] Zone_A: 17 | Zone_B: 48 | Zone_D: 61</div>
+              <div class="log-line warn">08:20:00 [WARN] Zone_D capacity > 85%! Event committed to HDFS datanodes.</div>
+            </div>
+          </div>
+        `;
+      } else if (nodeId === 'MAPREDUCE') {
+        nodeContent = `
+          <div class="tech-box">
+            <h4>MapReduce Batch Aggregation</h4>
+            <div class="mr-phase">
+              <strong>MAP PHASE:</strong><br/>
+              <code>Map(Zone_A->18), Map(Zone_B->52), Map(Zone_D->86)</code>
+            </div>
+            <div class="mr-phase">
+              <strong>SHUFFLE PHASE:</strong><br/>
+              <code>Group by Keys: Zone_D->[55, 61, 86]</code>
+            </div>
+            <div class="mr-phase">
+              <strong>REDUCE PHASE:</strong><br/>
+              <code>Zone_D Peak -> 86 | Avg -> 67.3 [CRITICAL BASELINE]</code>
+            </div>
+          </div>
+        `;
+      } else if (nodeId === 'STREAM_PROCESSING') {
+        const logsHtml = simulationState.streamLogs.map(l => `<div class="log-line">${l}</div>`).join('');
+        nodeContent = `
+          <div class="tech-box">
+            <h4>Stream Analytics Engine (Live Window)</h4>
+            <p>Processing Latency: <strong>12ms</strong> | State: <strong>RocksDB</strong></p>
+            <div class="log-preview">${logsHtml}</div>
+          </div>
+        `;
+      } else if (nodeId === 'DASHBOARD') {
+        nodeContent = `
+          <div class="tech-box">
+            <h4>Operations Control Room</h4>
+            <p>Terminal: <strong>Station Master Workstation 01</strong></p>
+            <p>Active Alert: <span class="badge critical">ZONE D CRITICAL</span></p>
+            <p>Workflow State: <strong>DETECT → VERIFY → RESPOND</strong></p>
+          </div>
+        `;
+      } else {
+        nodeContent = `
+          <div class="tech-box">
+            <h4>Telemetry Hardware Sensors</h4>
+            <p>Status: <strong>100% ONLINE</strong></p>
+            <p>Sensors: <strong>4x CCTV IP Cameras + 2x LiDAR Counter Beams</strong></p>
+          </div>
+        `;
+      }
 
       inspectorContent.innerHTML = `
         <div class="inspector-card">
           <div class="card-header">
-            <span class="badge ${statusClass}">${zone.status}</span>
+            <span class="badge green">${node.status}</span>
+            <span class="type-tag">Big Data Pipeline</span>
+          </div>
+          <h3 class="zone-title">${node.title}</h3>
+          <p class="zone-desc">${node.detail}</p>
+          <div class="stat-grid">
+            <div class="stat-box"><span class="stat-label">Role</span><span class="stat-val text-sm">${node.role}</span></div>
+            <div class="stat-box"><span class="stat-label">Technology</span><span class="stat-val text-sm">${node.tech}</span></div>
+          </div>
+          ${nodeContent}
+        </div>
+      `;
+    } else {
+      // Render Selected Zone Inspector
+      const zoneId = simulationState.selectedZone || 'ZONE_D';
+      const zone = simulationState.zones[zoneId];
+      const metrics = getZoneMetrics(zone);
+      const statusClass = metrics.status.toLowerCase();
+
+      const slidingWindowRows = zone.slidingWindow.map((ev, idx) => {
+        const isLatest = idx === zone.slidingWindow.length - 1;
+        const rowMetrics = getZoneMetrics({ count: ev.count, capacity: zone.capacity });
+        const rowState = rowMetrics.status.toLowerCase();
+        return `
+          <div class="window-item ${isLatest ? 'latest-event' : ''}">
+            <span class="win-time">${ev.timestamp}</span>
+            <span class="win-bar"><span class="win-fill ${rowState}" style="width: ${Math.min(100, (ev.count / zone.capacity) * 100)}%"></span></span>
+            <span class="win-count ${rowState}">${ev.count}</span>
+            <span class="win-delta">${ev.delta}</span>
+            ${isLatest ? '<span class="latest-tag">LATEST</span>' : ''}
+          </div>
+        `;
+      }).join('');
+
+      inspectorContent.innerHTML = `
+        <div class="inspector-card">
+          <div class="card-header">
+            <span class="badge ${statusClass}">${metrics.status}</span>
             <span class="type-tag">${zone.type}</span>
           </div>
           <h3 class="zone-title">${zone.name}</h3>
@@ -108,21 +247,21 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
             </div>
             <div class="stat-box">
               <span class="stat-label">Crowd Density</span>
-              <span class="stat-val">${zone.density} <small>p/m²</small></span>
+              <span class="stat-val">${metrics.density} <small>p/m²</small></span>
             </div>
             <div class="stat-box">
               <span class="stat-label">Trend (5-Min)</span>
-              <span class="stat-val trend">${zone.trend}</span>
+              <span class="stat-val trend">${metrics.trend}</span>
             </div>
           </div>
 
           <div class="capacity-bar-container">
             <div class="capacity-bar-header">
               <span>Zone Capacity Load</span>
-              <span>${Math.round((zone.count / zone.capacity) * 100)}%</span>
+              <span>${Math.round(metrics.loadRatio * 100)}%</span>
             </div>
             <div class="capacity-bar">
-              <div class="capacity-fill ${statusClass}" style="width: ${Math.min(100, (zone.count / zone.capacity) * 100)}%"></div>
+              <div class="capacity-fill ${statusClass}" style="width: ${Math.min(100, metrics.loadRatio * 100)}%"></div>
             </div>
           </div>
 
@@ -131,142 +270,17 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
               <span>LATEST 5-MINUTE SLIDING WINDOW</span>
               <button id="btn-step-window" class="btn-micro">+ STEP EVENT</button>
             </div>
-            <div id="sliding-window-list" class="window-list">
-              <!-- Rendered by renderSlidingWindowWidget -->
-            </div>
+            <div id="sliding-window-list" class="window-list">${slidingWindowRows}</div>
           </div>
 
           <div class="action-footer">
-            <button id="btn-operator-action" class="btn-primary-action ${zone.status === 'CRITICAL' ? 'pulse-alert' : ''}">
-              ${zone.status === 'CRITICAL' ? '⚠️ EXECUTE OPERATOR INTERVENTION' : 'VIEW OPERATOR WORKFLOW'}
+            <button id="btn-operator-action" class="btn-primary-action ${metrics.status === 'CRITICAL' ? 'pulse-alert' : ''}">
+              ${metrics.status === 'CRITICAL' ? '⚠️ EXECUTE OPERATOR INTERVENTION' : metrics.status === 'HIGH' ? '⚠️ REVIEW HIGH DENSITY WORKFLOW' : 'VIEW ZONE STATUS WORKFLOW'}
             </button>
           </div>
         </div>
       `;
-      renderSlidingWindowWidget();
-    } else if (activeSelection.type === 'PIPELINE_NODE') {
-      const node = PIPELINE_NODES[activeSelection.id];
-
-      let nodeContent = '';
-      if (node.id === 'HDFS') {
-        nodeContent = `
-          <div class="tech-box">
-            <h4>HDFS Cluster Log Storage</h4>
-            <p>Path: <code>/crowd/logs/2026/09/27/zone_events.snappy.parquet</code></p>
-            <div class="log-preview">
-              <div class="log-line">08:15:00 [INFO] Zone_A: 16 | Zone_B: 45 | Zone_D: 78</div>
-              <div class="log-line">08:15:15 [INFO] Zone_A: 18 | Zone_B: 48 | Zone_D: 82</div>
-              <div class="log-line">08:15:30 [INFO] Zone_A: 14 | Zone_B: 52 | Zone_D: 85</div>
-              <div class="log-line warn">08:15:45 [WARN] Zone_D threshold > 80! Event stored.</div>
-            </div>
-          </div>
-        `;
-      } else if (node.id === 'MAPREDUCE') {
-        nodeContent = `
-          <div class="tech-box">
-            <h4>MapReduce Batch Aggregation</h4>
-            <div class="mr-phase">
-              <strong>MAP PHASE:</strong><br/>
-              <code>R1(Zone_D) -> 78, R2(Zone_D) -> 82, R3(Zone_D) -> 86</code>
-            </div>
-            <div class="mr-phase">
-              <strong>SHUFFLE PHASE:</strong><br/>
-              <code>Zone_D -> [78, 82, 85, 86]</code>
-            </div>
-            <div class="mr-phase">
-              <strong>REDUCE PHASE:</strong><br/>
-              <code>Zone_D Peak -> 86 | Avg -> 82.75 [CRITICAL]</code>
-            </div>
-          </div>
-        `;
-      } else if (node.id === 'STREAM_PROCESSING') {
-        nodeContent = `
-          <div class="tech-box">
-            <h4>Stream Analytics Engine</h4>
-            <p>Windowing: <strong>Tumbling / Sliding 5-Minute Window</strong></p>
-            <p>Processing Latency: <strong>12 ms</strong></p>
-            <p>State Backend: <strong>RocksDB Distributed State</strong></p>
-          </div>
-        `;
-      } else if (node.id === 'DASHBOARD') {
-        nodeContent = `
-          <div class="tech-box">
-            <h4>Operations Control Room</h4>
-            <p>Operator: <strong>Station Master Terminal 01</strong></p>
-            <p>Active Alert: <span class="badge critical">ZONE D CRITICAL</span></p>
-            <p>Workflow State: <strong>DETECT → VERIFY → RESPOND</strong></p>
-          </div>
-        `;
-      }
-
-      inspectorContent.innerHTML = `
-        <div class="inspector-card">
-          <div class="card-header">
-            <span class="badge green">${node.status}</span>
-            <span class="type-tag">Big Data Pipeline</span>
-          </div>
-          <h3 class="zone-title">${node.title}</h3>
-          <p class="zone-desc">${node.detail}</p>
-
-          <div class="stat-grid">
-            <div class="stat-box">
-              <span class="stat-label">Role</span>
-              <span class="stat-val text-sm">${node.role}</span>
-            </div>
-            <div class="stat-box">
-              <span class="stat-label">Technology</span>
-              <span class="stat-val text-sm">${node.tech}</span>
-            </div>
-          </div>
-
-          ${nodeContent}
-        </div>
-      `;
-    } else if (activeSelection.type === 'SENSOR') {
-      const sensor = activeSelection.data;
-      inspectorContent.innerHTML = `
-        <div class="inspector-card">
-          <div class="card-header">
-            <span class="badge green">ONLINE</span>
-            <span class="type-tag">Telemetry Hardware</span>
-          </div>
-          <h3 class="zone-title">${sensor.type}</h3>
-          <p class="zone-desc">Monitors live optical inflow/outflow for ${sensor.zone}.</p>
-          <div class="stat-grid">
-            <div class="stat-box">
-              <span class="stat-label">Sensor ID</span>
-              <span class="stat-val text-sm">${sensor.id}</span>
-            </div>
-            <div class="stat-box">
-              <span class="stat-label">Sampling Rate</span>
-              <span class="stat-val text-sm">30 FPS Video</span>
-            </div>
-          </div>
-        </div>
-      `;
     }
-  }
-
-  // Render 5-Minute Sliding Window Items
-  function renderSlidingWindowWidget() {
-    const listEl = document.getElementById('sliding-window-list');
-    if (!listEl) return;
-
-    listEl.innerHTML = SLIDING_WINDOW.events.map((ev, idx) => {
-      const isLatest = idx === SLIDING_WINDOW.events.length - 1;
-      const stateClass = ev.state.toLowerCase();
-      return `
-        <div class="window-item ${isLatest ? 'latest-event' : ''}">
-          <span class="win-time">${ev.timestamp}</span>
-          <span class="win-bar">
-            <span class="win-fill ${stateClass}" style="width: ${Math.min(100, (ev.count / 95) * 100)}%"></span>
-          </span>
-          <span class="win-count ${stateClass}">${ev.count}</span>
-          <span class="win-delta">${ev.delta}</span>
-          ${isLatest ? '<span class="latest-tag">LATEST</span>' : ''}
-        </div>
-      `;
-    }).join('');
   }
 
   // Operator Response Modal Workflow
@@ -275,86 +289,130 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
     if (!modal) return;
     modal.classList.add('visible');
 
+    const zoneId = simulationState.selectedZone || 'ZONE_D';
+    const zone = simulationState.zones[zoneId];
+    const metrics = getZoneMetrics(zone);
+
     const modalBody = document.getElementById('operator-modal-body');
+
+    let optionsHtml = '';
+    if (metrics.status === 'CRITICAL') {
+      optionsHtml = `
+        <div class="alert-banner critical-banner">
+          <h4>🚨 LIVE CROWD ALERT: ${zone.name.toUpperCase()} (CRITICAL CONGESTION)</h4>
+          <p>Passenger count reached ${zone.count} people (${Math.round(metrics.loadRatio * 100)}% load ratio). Immediate mitigation required:</p>
+        </div>
+        <div class="intervention-options">
+          <h4>Select Operator Intervention Action:</h4>
+          <div class="option-card" id="opt-gate3" data-action="OPEN_AUX_GATE">
+            <div class="opt-icon">🚪</div>
+            <div class="opt-info">
+              <strong>OPEN AUXILIARY GATE 3</strong>
+              <p>Unlocks secondary side exit corridor to relieve turnstile pressure in Zone D.</p>
+            </div>
+            <button class="btn-action-execute" data-action="OPEN_AUX_GATE">EXECUTE</button>
+          </div>
+
+          <div class="option-card" id="opt-marshals" data-action="DEPLOY_MARSHALS">
+            <div class="opt-icon">👮</div>
+            <div class="opt-info">
+              <strong>DEPLOY CROWD MARSHALS</strong>
+              <p>Dispatches 4 station security personnel to regulate passenger queueing.</p>
+            </div>
+            <button class="btn-action-execute" data-action="DEPLOY_MARSHALS">EXECUTE</button>
+          </div>
+
+          <div class="option-card" id="opt-reroute" data-action="BROADCAST_REROUTE">
+            <div class="opt-icon">📢</div>
+            <div class="opt-info">
+              <strong>BROADCAST AUDIO REROUTE ANNOUNCEMENT</strong>
+              <p>Directs incoming Platform 1 passengers to West Corridor (Zone C).</p>
+            </div>
+            <button class="btn-action-execute" data-action="BROADCAST_REROUTE">EXECUTE</button>
+          </div>
+        </div>
+      `;
+    } else if (metrics.status === 'HIGH') {
+      optionsHtml = `
+        <div class="alert-banner high-banner" style="border-color:#f59e0b; background:rgba(245,158,11,0.15);">
+          <h4>⚠️ HIGH DENSITY ADVISORY: ${zone.name.toUpperCase()}</h4>
+          <p>Passenger count is ${zone.count} people (${Math.round(metrics.loadRatio * 100)}% load ratio). Recommended preventive measures:</p>
+        </div>
+        <div class="intervention-options">
+          <h4>Select Operator Action:</h4>
+          <div class="option-card" id="opt-gate3" data-action="OPEN_AUX_GATE">
+            <div class="opt-icon">🚪</div>
+            <div class="opt-info"><strong>OPEN AUXILIARY EXIT GATE</strong><p>Relieves ticket counter congestion.</p></div>
+            <button class="btn-action-execute" data-action="OPEN_AUX_GATE">EXECUTE</button>
+          </div>
+          <div class="option-card" id="opt-marshals" data-action="DEPLOY_MARSHALS">
+            <div class="opt-icon">👮</div>
+            <div class="opt-info"><strong>DEPLOY PATROL MARSHALS</strong><p>Dispatches station security.</p></div>
+            <button class="btn-action-execute" data-action="DEPLOY_MARSHALS">EXECUTE</button>
+          </div>
+        </div>
+      `;
+    } else {
+      optionsHtml = `
+        <div class="alert-banner normal-banner" style="border-color:#10b981; background:rgba(16,185,129,0.15);">
+          <h4>ℹ️ ROUTINE STATUS: ${zone.name.toUpperCase()}</h4>
+          <p>Passenger flow is normal (${zone.count} people, ${Math.round(metrics.loadRatio * 100)}% load ratio). All systems optimal.</p>
+        </div>
+        <div class="intervention-options">
+          <div class="option-card" id="opt-reroute" data-action="BROADCAST_REROUTE">
+            <div class="opt-icon">📢</div>
+            <div class="opt-info"><strong>BROADCAST ROUTINE INFORMATION ANNOUNCEMENT</strong><p>Standard train schedule broadcast.</p></div>
+            <button class="btn-action-execute" data-action="BROADCAST_REROUTE">EXECUTE</button>
+          </div>
+        </div>
+      `;
+    }
+
     modalBody.innerHTML = `
       <div class="workflow-stepper">
-        <div class="step-item completed">
-          <span class="step-num">1</span>
-          <span class="step-name">DETECT</span>
-        </div>
+        <div class="step-item completed"><span class="step-num">1</span><span class="step-name">DETECT</span></div>
         <div class="step-line active"></div>
-        <div class="step-item active">
-          <span class="step-num">2</span>
-          <span class="step-name">VERIFY</span>
-        </div>
+        <div class="step-item active"><span class="step-num">2</span><span class="step-name">VERIFY</span></div>
         <div class="step-line"></div>
-        <div class="step-item">
-          <span class="step-num">3</span>
-          <span class="step-name">RESPOND</span>
-        </div>
+        <div class="step-item"><span class="step-num">3</span><span class="step-name">RESPOND</span></div>
         <div class="step-line"></div>
-        <div class="step-item">
-          <span class="step-num">4</span>
-          <span class="step-name">MONITOR</span>
-        </div>
+        <div class="step-item"><span class="step-num">4</span><span class="step-name">MONITOR</span></div>
       </div>
-
-      <div class="alert-banner critical-banner">
-        <h4>🚨 LIVE CROWD ALERT: ZONE D (CRITICAL CONGESTION)</h4>
-        <p>Turnstile exit queue has reached 86 passengers (91% density limit). Sliding window indicates continuous inflow over last 5 minutes.</p>
-      </div>
-
-      <div class="intervention-options">
-        <h4>Select Operator Intervention Action:</h4>
-        <div class="option-card" id="opt-gate3">
-          <div class="opt-icon">🚪</div>
-          <div class="opt-info">
-            <strong>OPEN AUXILIARY GATE 3</strong>
-            <p>Unlocks secondary side exit corridor to relieve turnstile pressure in Zone D.</p>
-          </div>
-          <button class="btn-action-execute" onclick="window.executeIntervention('OPEN_AUX_GATE')">EXECUTE</button>
-        </div>
-
-        <div class="option-card" id="opt-marshals">
-          <div class="opt-icon">👮</div>
-          <div class="opt-info">
-            <strong>DEPLOY CROWD MARSHALS</strong>
-            <p>Dispatches 4 station security personnel to manage passenger queueing.</p>
-          </div>
-          <button class="btn-action-execute" onclick="window.executeIntervention('DEPLOY_MARSHALS')">EXECUTE</button>
-        </div>
-
-        <div class="option-card" id="opt-reroute">
-          <div class="opt-icon">📢</div>
-          <div class="opt-info">
-            <strong>BROADCAST AUDIO REROUTE ANNOUNCEMENT</strong>
-            <p>Directs incoming Platform 1 passengers to West Corridor (Zone C).</p>
-          </div>
-          <button class="btn-action-execute" onclick="window.executeIntervention('BROADCAST_REROUTE')">EXECUTE</button>
-        </div>
-      </div>
+      ${optionsHtml}
     `;
   }
 
   // Global action execution callback
   window.executeIntervention = function(actionType) {
+    const activeZoneId = simulationState.selectedZone || 'ZONE_D';
+    const zone = simulationState.zones[activeZoneId];
+
     if (actionType === 'OPEN_AUX_GATE' || actionType === 'OPEN_GATE') {
-      ZONES.ZONE_D.count = 45;
-      ZONES.ZONE_D.status = 'HIGH';
-      ZONES.ZONE_D.density = 0.48;
-      ZONES.ZONE_D.trend = 'REDUCING';
-      showToastNotification('✅ Auxiliary Gate 3 Opened! Zone D count reduced to 45.');
+      simulationState.interventions.gate3 = true;
+      zone.count = Math.max(35, zone.count - 30);
+      showToastNotification(`✅ Auxiliary Gate 3 Opened! ${zone.name} count reduced to ${zone.count}.`);
+      const venueGroup = scene ? scene.getObjectByName('PUBLIC_VENUE') : null;
+      if (venueGroup) updateGate3Visual(true, venueGroup);
     } else if (actionType === 'DEPLOY_MARSHALS' || actionType === 'MARSHALS') {
-      ZONES.ZONE_D.count = 58;
-      ZONES.ZONE_D.status = 'HIGH';
-      showToastNotification('👮 Crowd Marshals Deployed. Passenger queue regulated.');
+      simulationState.interventions.marshals = true;
+      zone.count = Math.max(45, zone.count - 20);
+      showToastNotification(`👮 Security Marshals Deployed to ${zone.name}. Passenger queue regulated.`);
     } else if (actionType === 'BROADCAST_REROUTE' || actionType === 'REROUTE') {
-      ZONES.ZONE_D.count = 62;
-      showToastNotification('📢 Audio Announcement Broadcasted. Passenger traffic diverted.');
+      simulationState.interventions.announcement = true;
+      zone.count = Math.max(50, zone.count - 15);
+      showToastNotification(`📢 Audio Reroute Broadcasted for ${zone.name}. Passenger traffic diverted.`);
     }
+
+    // Sync 3D crowd meshes
+    if (scene && crowdMembers && zoneBounds) {
+      syncCrowdDensityForZone(activeZoneId, zone.count, scene, crowdMembers, zoneBounds);
+    }
+
     closeModals();
     renderInspector();
+    syncTopNavStatusDots();
   };
+
   window.execAction = window.executeIntervention;
 
   function closeModals() {
@@ -368,17 +426,24 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
     setTimeout(() => alertToast.classList.remove('visible'), 4000);
   }
 
-  // Handle raycast click event selection from interaction.js
   function handleSelectObject(selection) {
-    activeSelection = selection;
+    if (selection.type === 'ZONE') {
+      simulationState.selectedZone = selection.id;
+      simulationState.selectedPipelineNode = null;
+    } else if (selection.type === 'PIPELINE_NODE') {
+      simulationState.selectedPipelineNode = selection.id;
+    }
     renderInspector();
+    syncTopNavStatusDots();
   }
 
-  // Initial render
+  // Initial render & status dot sync
   renderInspector();
+  syncTopNavStatusDots();
 
   return {
     handleSelectObject,
-    renderInspector
+    renderInspector,
+    syncTopNavStatusDots
   };
 }
