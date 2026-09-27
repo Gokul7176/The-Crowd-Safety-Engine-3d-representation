@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>THE CROWD SAFETY ENGINE — Real-Time Analytics for Detecting Crowd Congestion</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 3D WEBGL CONTAINER -->
+    <div id="canvas-container"></div>
+
+    <!-- HEADER BAR -->
+    <header class="header-bar">
+      <div class="brand-section">
+        <div class="brand-icon">🚆</div>
+        <div class="brand-titles">
+          <h1>THE CROWD SAFETY ENGINE</h1>
+          <p>Real-Time Analytics for Detecting Crowd Congestion</p>
+        </div>
+      </div>
+
+      <div class="seminar-pill">
+        <span class="status-dot green"></span>
+        <span>23IT711 · Big Data Analytics | Gokul SV (2303717620521019) | Coimbatore Institute of Technology</span>
+      </div>
+    </header>
+
+    <!-- FLOATING TOP NAVIGATION QUICK BAR -->
+    <nav class="nav-control-bar">
+      <button id="btn-reset-view" class="nav-btn active">
+        <span>🎥 RESET VIEW</span>
+      </button>
+
+      <button class="nav-btn btn-zone-nav" data-zone="ZONE_A">
+        <span class="status-dot green"></span> ZONE A (NORMAL)
+      </button>
+
+      <button class="nav-btn btn-zone-nav" data-zone="ZONE_B">
+        <span class="status-dot amber"></span> ZONE B (HIGH)
+      </button>
+
+      <button class="nav-btn btn-zone-nav" data-zone="ZONE_C">
+        <span class="status-dot green"></span> ZONE C (NORMAL)
+      </button>
+
+      <button class="nav-btn btn-zone-nav critical-btn" data-zone="ZONE_D">
+        <span class="status-dot red"></span> ZONE D (CRITICAL)
+      </button>
+
+      <button class="nav-btn btn-node-nav" data-node="HDFS">
+        <span>💾 HDFS</span>
+      </button>
+
+      <button class="nav-btn btn-node-nav" data-node="MAPREDUCE">
+        <span>⚙️ MAPREDUCE</span>
+      </button>
+
+      <button class="nav-btn btn-node-nav" data-node="STREAM_PROCESSING">
+        <span>⚡ STREAM ENGINE</span>
+      </button>
+
+      <button class="nav-btn btn-node-nav" data-node="DASHBOARD">
+        <span>🖥️ CONTROL ROOM</span>
+      </button>
+
+      <button id="btn-toggle-sim" class="nav-btn active">
+        <span class="status-dot green"></span> LIVE SIMULATION
+      </button>
+    </nav>
+
+    <!-- RIGHT SIDEBAR INSPECTOR -->
+    <aside class="sidebar-inspector">
+      <div class="inspector-header">
+        <h2>TRANSPORT / CROWD DATA INSPECTOR</h2>
+        <span class="status-dot green"></span>
+      </div>
+      <div id="inspector-content" class="inspector-body">
+        <!-- Rendered dynamically by uiController.js -->
+      </div>
+    </aside>
+
+    <!-- BOTTOM PIPELINE BAR -->
+    <footer class="pipeline-bar">
+      <div class="pipeline-title">END-TO-END BIG DATA PIPELINE</div>
+      <div class="pipeline-flow">
+        <div class="pipe-step btn-node-nav" data-node="DATA_SOURCES">
+          <span>📷 SENSORS</span>
+        </div>
+        <span class="pipe-arrow">→</span>
+
+        <div class="pipe-step btn-node-nav" data-node="HDFS">
+          <span>💾 HDFS LOGS</span>
+        </div>
+        <span class="pipe-arrow">→</span>
+
+        <div class="pipe-step btn-node-nav" data-node="MAPREDUCE">
+          <span>⚙️ MAPREDUCE</span>
+        </div>
+        <span class="pipe-arrow">→</span>
+
+        <div class="pipe-step btn-node-nav" data-node="STREAM_PROCESSING">
+          <span>⚡ STREAM ANALYTICS</span>
+        </div>
+        <span class="pipe-arrow">→</span>
+
+        <div class="pipe-step btn-node-nav" data-node="DASHBOARD">
+          <span>🖥️ CONTROL ROOM</span>
+        </div>
+        <span class="pipe-arrow">→</span>
+
+        <div class="pipe-step btn-zone-nav" data-zone="ZONE_D">
+          <span class="status-dot red"></span> <span>OPERATOR ACTION</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- OPERATOR RESPONSE MODAL -->
+    <div id="operator-modal" class="modal-overlay">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>OPERATOR INTERVENTION WORKFLOW</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div id="operator-modal-body" class="modal-body">
+          <!-- Rendered dynamically by uiController.js -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ALERT TOAST -->
+    <div id="alert-toast" class="alert-toast">
+      🚨 LIVE CROWD ALERT: Zone D Bottleneck Critical!
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
