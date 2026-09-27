@@ -827,4 +827,10 @@ ${appJsCode}
 const outputPath = path.join(__dirname, 'standalone.html');
 fs.writeFileSync(outputPath, standaloneHtml, 'utf8');
 
+const publicDir = path.join(__dirname, 'public');
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir, { recursive: true });
+}
+fs.writeFileSync(path.join(publicDir, 'standalone.html'), standaloneHtml, 'utf8');
+
 console.log('Successfully compiled 100% self-contained standalone.html! File size:', fs.statSync(outputPath).size, 'bytes.');
