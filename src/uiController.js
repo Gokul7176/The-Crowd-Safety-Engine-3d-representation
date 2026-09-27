@@ -47,7 +47,7 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
     });
   }
 
-  // Trigger New Stream Event in Sliding Window
+  // Global Click Event Listener for Action Triggers & Modals
   document.addEventListener('click', (e) => {
     if (e.target.closest('#btn-step-window')) {
       const result = SLIDING_WINDOW.pushNewEvent();
@@ -59,12 +59,24 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
       showToastNotification(`New Stream Event Arrived (${result.newEvent.timestamp} -> ${result.newEvent.count} people). Window advanced!`);
     }
 
-    if (e.target.closest('#btn-operator-action')) {
+    if (e.target.closest('#btn-operator-action') || e.target.closest('.btn-operator-modal-trigger')) {
       openOperatorModal();
     }
 
     if (e.target.closest('.modal-close')) {
       closeModals();
+    }
+
+    const optionCard = e.target.closest('.option-card');
+    if (optionCard && e.target.closest('#operator-modal')) {
+      const act = optionCard.getAttribute('data-action') || optionCard.id;
+      if (act.includes('gate') || act.includes('GATE')) {
+        window.executeIntervention('OPEN_AUX_GATE');
+      } else if (act.includes('marshal') || act.includes('MARSHALS')) {
+        window.executeIntervention('DEPLOY_MARSHALS');
+      } else if (act.includes('reroute') || act.includes('REROUTE')) {
+        window.executeIntervention('BROADCAST_REROUTE');
+      }
     }
   });
 
@@ -326,23 +338,24 @@ export function setupUIController(interactionHandler, sceneSetup, toggleSimulati
 
   // Global action execution callback
   window.executeIntervention = function(actionType) {
-    if (actionType === 'OPEN_AUX_GATE') {
+    if (actionType === 'OPEN_AUX_GATE' || actionType === 'OPEN_GATE') {
       ZONES.ZONE_D.count = 45;
       ZONES.ZONE_D.status = 'HIGH';
       ZONES.ZONE_D.density = 0.48;
       ZONES.ZONE_D.trend = 'REDUCING';
       showToastNotification('✅ Auxiliary Gate 3 Opened! Zone D count reduced to 45.');
-    } else if (actionType === 'DEPLOY_MARSHALS') {
+    } else if (actionType === 'DEPLOY_MARSHALS' || actionType === 'MARSHALS') {
       ZONES.ZONE_D.count = 58;
       ZONES.ZONE_D.status = 'HIGH';
       showToastNotification('👮 Crowd Marshals Deployed. Passenger queue regulated.');
-    } else if (actionType === 'BROADCAST_REROUTE') {
+    } else if (actionType === 'BROADCAST_REROUTE' || actionType === 'REROUTE') {
       ZONES.ZONE_D.count = 62;
       showToastNotification('📢 Audio Announcement Broadcasted. Passenger traffic diverted.');
     }
     closeModals();
     renderInspector();
   };
+  window.execAction = window.executeIntervention;
 
   function closeModals() {
     document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('visible'));
